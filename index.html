@@ -1,0 +1,888 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pglite-visualizer</title>
+  <link rel="icon" href="data:," />
+  <script src="./node_modules/d3/dist/d3.min.js"></script>
+  <!-- Resolves the bare specifier used below to the local PGlite build. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "@electric-sql/pglite": "./node_modules/@electric-sql/pglite/dist/index.js",
+        "@electric-sql/pglite/contrib/pageinspect": "./node_modules/@electric-sql/pglite/dist/contrib/pageinspect.js",
+        "@electric-sql/pglite/": "./node_modules/@electric-sql/pglite/"
+      }
+    }
+  </script>
+  <style>
+    /* Palette and type follow austinc.net. */
+    :root {
+      --bg: #f7f4ec;
+      --fg: #222222;
+      --muted: #808080;
+      --heading: #5f5f5f;
+      --border: #d9d4c4;
+      --surface: #efebdf;
+      --yellow: #fbb813;
+      --red: #f1412e;
+      --blue: #17a4d8;
+      --accent: var(--blue);
+      --on-accent: #1a1a1a;
+      --error: #c9301e;
+      color-scheme: light dark; /* native scrollbars and form controls follow the theme */
+    }
+    :root[data-theme="light"] { color-scheme: light; }
+    :root[data-theme="dark"] { color-scheme: dark; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #1a1a1a;
+        --fg: #e6e6e6;
+        --muted: #9a9a9a;
+        --heading: #bdbdbd;
+        --border: #333333;
+        --surface: #232323;
+        --error: #ff6a57;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #1a1a1a;
+      --fg: #e6e6e6;
+      --muted: #9a9a9a;
+      --heading: #bdbdbd;
+      --border: #333333;
+      --surface: #232323;
+      --error: #ff6a57;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "Gill Sans", "Gill Sans MT", "Avenir Next", Avenir, "Helvetica Neue", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    main { max-width: 72rem; margin: 0 auto; padding: 0.7in 0.9in 0.9in; }
+    a { color: var(--fg); }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+    header { display: flex; align-items: center; gap: 0.25in; margin-bottom: 0.2in; }
+    h1 { margin: 0; font-weight: 400; font-size: 26px; color: var(--heading); letter-spacing: 0.01em; }
+    h2 { margin: 0 0 0.12in; font-weight: 400; font-size: 22px; color: var(--heading); }
+    h2.rule { padding-bottom: 0.08in; border-bottom: 1px solid var(--muted); }
+    .sub { color: var(--muted); margin: 0 0 1rem; font-size: 0.9rem; }
+    @media (max-width: 600px) {
+      main { padding: 0.5in 16px; }
+    }
+    #status { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.75rem; }
+
+    textarea {
+      width: 100%;
+      min-height: 8rem;
+      padding: 0.6rem;
+      font: 0.9rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--fg);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      resize: vertical;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 0.5rem 0 1rem;
+    }
+    button {
+      font: inherit;
+      padding: 0.45rem 0.9rem;
+      color: var(--on-accent);
+      background: var(--accent);
+      border: 0;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button.secondary {
+      color: var(--fg);
+      background: transparent;
+      border: 1px solid var(--muted);
+    }
+    .hint { color: var(--muted); font-size: 0.8rem; margin-left: auto; }
+
+    #results { display: grid; gap: 1rem; }
+    .result-meta { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.3rem; }
+    .result-meta.error { color: var(--error); white-space: pre-wrap; font-family: ui-monospace, monospace; }
+    .result-meta.ok { color: var(--heading); }
+    pre.plan {
+      margin: 0 0 0.25rem;
+      padding: 0.6rem;
+      overflow-x: auto;
+      font: 0.8rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+    }
+    .plan-head { margin-top: 0.75rem; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 2px; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+    th, td {
+      padding: 0.35rem 0.6rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      max-width: 28rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: ui-monospace, monospace;
+    }
+    th { background: var(--surface); position: sticky; top: 0; }
+    td.null { color: var(--muted); font-style: italic; }
+
+    #stats { margin-top: 0.5in; }
+    .stats-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+    .stats-head label { font-size: 0.85rem; color: var(--muted); display: flex; align-items: center; gap: 0.3rem; }
+    #stats h3 { font-size: 0.9rem; margin: 1rem 0 0.3rem; color: var(--muted); font-weight: 600; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .empty { color: var(--muted); font-size: 0.85rem; padding: 0.5rem 0; }
+
+    tr[data-index] { cursor: pointer; }
+    tr[data-index]:hover td { background: var(--surface); }
+    tr[data-index].selected td { background: var(--surface); box-shadow: inset 3px 0 0 var(--yellow); }
+    #index-tree { margin-top: 1rem; }
+    #index-tree .tree-title { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.2rem; }
+    #index-tree .hint { margin: 0 0 0.5rem; display: block; }
+    details.child { margin: 0.15rem 0 0.15rem 1rem; border-left: 1px solid var(--border); padding-left: 0.6rem; }
+    details.child > summary, .hk {
+      font: 0.8rem ui-monospace, monospace;
+      cursor: pointer;
+      padding: 0.15rem 0;
+    }
+    .hk { color: var(--muted); cursor: default; margin-left: 1rem; padding-left: 0.6rem; }
+    .child-body { padding: 0.25rem 0; }
+    .tree-root { border: 1px solid var(--border); border-radius: 2px; padding: 0.6rem; overflow-x: auto; }
+
+    .section-head { display: flex; align-items: center; gap: 0.75rem; margin: 1rem 0 0.4rem; }
+    .section-head .tree-title { margin: 0; }
+    .section-head button { padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+    .diagram { border: 1px solid var(--border); border-radius: 2px; background: var(--bg); overflow: hidden; }
+    .diagram svg { display: block; width: 100%; height: 440px; cursor: grab; touch-action: none; }
+    .diagram svg:active { cursor: grabbing; }
+    .diagram .empty { padding: 0.75rem; }
+    .diagram text { font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: var(--fg); }
+    .diagram text.muted { fill: var(--muted); }
+    .diagram .edge { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+    .diagram .sibling { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 4 3; }
+    .diagram marker path { fill: var(--accent); }
+    .diagram .node rect { stroke: var(--muted); stroke-width: 1; fill: var(--surface); }
+    .diagram .node.root rect { fill: color-mix(in srgb, var(--yellow) 45%, var(--bg)); }
+    .diagram .node.internal rect { fill: color-mix(in srgb, var(--blue) 20%, var(--bg)); }
+    .diagram .node.leaf rect { fill: var(--surface); }
+    .diagram .node.root text.muted { fill: var(--fg); opacity: 0.75; } /* muted grey is too faint on the yellow */
+    .legend { font-size: 0.78rem; color: var(--muted); margin: 0.3rem 0 0; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>pglite-visualizer</h1>
+    </header>
+    <p class="sub">PGlite (Postgres in WebAssembly). All db state is held and r/w in memory, but also flushes into this browser's IndexedDB for persistence between sessions.</p>
+    <div id="status">Starting PGlite…</div>
+
+    <h2 class="rule">Query</h2>
+    <label for="sql" class="sub">SQL</label>
+    <textarea id="sql" spellcheck="false" placeholder="SELECT * FROM fruits;" disabled></textarea>
+
+    <div class="toolbar">
+      <button id="run" disabled>Run</button>
+      <button id="clear" class="secondary" disabled>Clear results</button>
+      <span class="hint">Ctrl/⌘ + Enter to run</span>
+    </div>
+
+    <div id="results"></div>
+
+    <section id="stats">
+      <h2 class="rule">Storage stats</h2>
+      <div class="stats-head">
+        <button id="refresh" class="secondary" disabled>Refresh</button>
+        <label><input type="checkbox" id="auto" checked /> Auto-refresh (2s)</label>
+        <label><input type="checkbox" id="system" /> Show system schemas (pg_catalog, information_schema, pg_toast)</label>
+        <span id="stats-updated" class="sub" style="margin:0"></span>
+      </div>
+      <div id="stats-body" class="empty">Waiting for database…</div>
+      <div id="index-tree"></div>
+    </section>
+  </main>
+
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const statusEl = $("status");
+    const sqlEl = $("sql");
+    const runBtn = $("run");
+    const clearBtn = $("clear");
+    const resultsEl = $("results");
+
+    const escapeHtml = (value) =>
+      String(value).replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    function formatCell(value) {
+      if (value === null || value === undefined) return '<td class="null">NULL</td>';
+      const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+      return `<td title="${escapeHtml(text)}">${escapeHtml(text)}</td>`;
+    }
+
+    // Render one statement's result: a table when it returns columns, otherwise a row count.
+    // Splits SQL text on top-level semicolons, respecting '..' and ".." quoting, $tag$..$tag$ bodies,
+    // and -- / /* */ comments, so each statement can be run (and EXPLAINed) on its own.
+    function splitStatements(sql) {
+      const out = [];
+      let cur = "";
+      let i = 0;
+      const take = (end) => { cur += sql.slice(i, end); i = end; };
+      while (i < sql.length) {
+        const c = sql[i], n = sql[i + 1];
+        if (c === "-" && n === "-") { const j = sql.indexOf("\n", i); take(j < 0 ? sql.length : j); continue; }
+        if (c === "/" && n === "*") { const j = sql.indexOf("*/", i + 2); take(j < 0 ? sql.length : j + 2); continue; }
+        if (c === "'" || c === '"') {
+          let j = i + 1;
+          while (j < sql.length && !(sql[j] === c && sql[j + 1] !== c)) j += sql[j] === c ? 2 : 1; // '' / "" escape
+          take(Math.min(j + 1, sql.length));
+          continue;
+        }
+        if (c === "$" && !/\w/.test(sql[i - 1] ?? "")) {
+          const tag = /^\$\w*\$/.exec(sql.slice(i))?.[0];
+          if (tag && !/^\$\d/.test(tag)) {
+            const j = sql.indexOf(tag, i + tag.length);
+            take(j < 0 ? sql.length : j + tag.length);
+            continue;
+          }
+        }
+        if (c === ";") { out.push(cur); cur = ""; i++; continue; }
+        take(i + 1);
+      }
+      out.push(cur);
+      return out.map((t) => t.trim()).filter((t) => stripLeading(t) !== "");
+    }
+    const stripLeading = (t) => t.replace(/^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*/, "");
+    const isSelect = (t) => /^select\b/i.test(stripLeading(t));
+
+    function renderResult(result, index, plan) {
+      const block = document.createElement("div");
+      const label = `#${index + 1}`;
+      if (result.fields && result.fields.length) {
+        const head = result.fields.map((f) => `<th>${escapeHtml(f.name)}</th>`).join("");
+        const body = result.rows
+          .map((row) => `<tr>${result.fields.map((f) => formatCell(row[f.name])).join("")}</tr>`)
+          .join("");
+        block.innerHTML = `
+          <div class="result-meta ok">${label} ${result.rows.length} row(s)</div>
+          <div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+      } else {
+        const affected = result.affectedRows ?? 0;
+        block.innerHTML = `<div class="result-meta ok">${label} OK, ${affected} row(s) affected</div>`;
+      }
+      if (plan) {
+        block.insertAdjacentHTML("beforeend",
+          `<div class="result-meta plan-head">QUERY PLAN · EXPLAIN (ANALYZE, BUFFERS)</div>` +
+          `<pre class="plan">${escapeHtml(plan)}</pre>`);
+      }
+      return block;
+    }
+
+    async function run() {
+      const sql = sqlEl.value.trim();
+      if (!sql) return;
+      runBtn.disabled = true;
+      resultsEl.innerHTML = "";
+      try {
+        // Run statements one at a time; every statement that begins with SELECT is also run under
+        // EXPLAIN ANALYZE, and its plan is shown beneath its results.
+        const statements = splitStatements(sql);
+        let shown = 0;
+        for (const stmt of statements) {
+          const [result] = await window.db.exec(stmt);
+          if (!result) continue;
+          let plan = null;
+          if (isSelect(stmt)) {
+            const plans = await window.db.query(`EXPLAIN (ANALYZE, BUFFERS) ${stmt}`);
+            plan = plans.rows.map((r) => r["QUERY PLAN"]).join("\n");
+          }
+          resultsEl.appendChild(renderResult(result, shown++, plan));
+        }
+        if (!shown) resultsEl.innerHTML = '<div class="result-meta">No statements to run.</div>';
+      } catch (err) {
+        const block = document.createElement("div");
+        block.innerHTML = `<div class="result-meta error">${escapeHtml(err.message ?? err)}</div>`;
+        resultsEl.appendChild(block);
+      } finally {
+        runBtn.disabled = false;
+        refreshStats();
+      }
+    }
+
+    // ---- Storage stats -------------------------------------------------------
+    const statsBody = $("stats-body");
+    const statsUpdated = $("stats-updated");
+    const refreshBtn = $("refresh");
+    const autoEl = $("auto");
+
+    function formatBytes(n) {
+      n = Number(n);
+      if (n < 1024) return `${n} B`;
+      const units = ["KiB", "MiB", "GiB", "TiB"];
+      let i = -1;
+      do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
+      return `${n.toFixed(n < 10 ? 2 : 1)} ${units[i]}`;
+    }
+
+    const systemEl = $("system");
+    const schemaFilter = () => systemEl.checked
+      ? "TRUE"
+      : `n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%'`;
+
+    // pg_stat_all_tables (not pg_stat_user_tables) so system tables have stats too.
+    const tablesSql = () => `
+      SELECT n.nspname AS schema, c.relname AS name,
+             pg_relation_size(c.oid) AS table_size,
+             pg_indexes_size(c.oid) AS index_size,
+             pg_total_relation_size(c.oid) AS total_size,
+             COALESCE(s.n_live_tup, 0) AS live_rows
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      LEFT JOIN pg_stat_all_tables s ON s.relid = c.oid
+      WHERE c.relkind IN ('r', 'p', 'm') AND ${schemaFilter()}
+      ORDER BY total_size DESC, name`;
+
+    const indexesSql = () => `
+      SELECT n.nspname AS schema, t.relname AS table, i.relname AS name,
+             am.amname AS am, pg_relation_size(i.oid) AS size
+      FROM pg_index x
+      JOIN pg_class i ON i.oid = x.indexrelid
+      JOIN pg_am am ON am.oid = i.relam
+      JOIN pg_class t ON t.oid = x.indrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+      WHERE ${schemaFilter()}
+      ORDER BY size DESC, name`;
+
+    function statsTable(headers, rows, rowAttrs = () => "") {
+      const head = headers.map(([label, num]) => `<th class="${num ? "num" : ""}">${label}</th>`).join("");
+      const body = rows
+        .map((cells, i) => `<tr ${rowAttrs(i)}>${cells.map(([text, num, title]) =>
+          `<td class="${num ? "num" : ""}"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(text)}</td>`).join("")}</tr>`)
+        .join("");
+      return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    }
+
+    let refreshing = false;
+    async function refreshStats() {
+      if (!window.db || refreshing) return;
+      refreshing = true;
+      try {
+        const [tables, indexes, dbSize] = await Promise.all([
+          window.db.query(tablesSql()),
+          window.db.query(indexesSql()),
+          window.db.query("SELECT pg_database_size(current_database()) AS size"),
+        ]);
+        const tableHtml = tables.rows.length
+          ? statsTable(
+              [
+                ["relname (table name)"],
+                ["n_live_tup (estimated live rows)", 1],
+                ["pg_relation_size (table heap only)", 1],
+                ["pg_indexes_size (all indexes on the table)", 1],
+                ["pg_total_relation_size (heap + indexes + TOAST)", 1],
+              ],
+              tables.rows.map((r) => [
+                [`${r.schema}.${r.name}`],
+                [Number(r.live_rows).toLocaleString(), 1],
+                [formatBytes(r.table_size), 1],
+                [formatBytes(r.index_size), 1],
+                [formatBytes(r.total_size), 1],
+              ]))
+          : '<div class="empty">No user tables.</div>';
+        const indexHtml = indexes.rows.length
+          ? statsTable(
+              [
+                ["relname (index name)"],
+                ["indrelid (table indexed)"],
+                ["amname (access method)"],
+                ["pg_relation_size (index size)", 1],
+              ],
+              indexes.rows.map((r) => [
+                [`${r.schema}.${r.name}`], [r.table], [r.am], [formatBytes(r.size), 1],
+              ]),
+              (i) => {
+                const r = indexes.rows[i];
+                const sel = selectedIndex && selectedIndex.schema === r.schema && selectedIndex.name === r.name;
+                return `data-index data-schema="${escapeHtml(r.schema)}" data-name="${escapeHtml(r.name)}" ` +
+                  `data-am="${escapeHtml(r.am)}" class="${sel ? "selected" : ""}" title="Click to inspect index pages"`;
+              })
+          : '<div class="empty">No user indexes.</div>';
+        statsBody.className = "";
+        statsBody.innerHTML =
+          `<div class="result-meta">pg_database_size (whole database, incl. system catalogs): ${formatBytes(dbSize.rows[0].size)}</div>` +
+          `<h3>Tables</h3>${tableHtml}<h3>Indexes</h3>${indexHtml}`;
+        statsUpdated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+      } catch (err) {
+        statsBody.className = "result-meta error";
+        statsBody.textContent = "Stats failed: " + (err.message ?? err);
+      } finally {
+        refreshing = false;
+      }
+    }
+
+    // ---- Index tree (pageinspect) ----------------------------------------------
+    const treeEl = $("index-tree");
+    let selectedIndex = null; // { schema, name, am }
+    const qident = (s) => `"${s.replaceAll('"', '""')}"`;
+    const pageTypes = { r: "root", i: "internal", l: "leaf", e: "ignored", d: "deleted leaf", D: "deleted internal" };
+    const shorten = (s, n = 60) => (s.length > n ? s.slice(0, n) + "…" : s);
+
+    // ---- Key decoding ---------------------------------------------------------
+    // pageinspect returns index tuple keys as raw hex bytes. Using the index's column types from the
+    // catalog we can decode the common cases (ints, bool, date, timestamps, floats, text); anything else
+    // falls back to hex.
+    const keyDecoders = new Map(); // rel -> (hex) => string
+    const hexBytes = (hex) => hex.trim().split(/\s+/).map((h) => parseInt(h, 16));
+    const readLE = (bytes, signed) => {
+      let v = 0n;
+      for (let i = bytes.length - 1; i >= 0; i--) v = (v << 8n) | BigInt(bytes[i]);
+      const bits = BigInt(bytes.length * 8);
+      return signed && v >= 1n << (bits - 1n) ? v - (1n << bits) : v;
+    };
+
+    function fixedValue(typ, bytes) {
+      switch (typ) {
+        case "int2": case "int4": case "int8": return String(readLE(bytes, true));
+        case "oid": return String(readLE(bytes, false));
+        case "bool": return bytes[0] ? "true" : "false";
+        case "date": return new Date(Date.UTC(2000, 0, 1) + Number(readLE(bytes, true)) * 864e5).toISOString().slice(0, 10);
+        case "timestamp": case "timestamptz":
+          return new Date(Date.UTC(2000, 0, 1) + Number(readLE(bytes, true)) / 1000).toISOString();
+        case "float4": case "float8": {
+          const dv = new DataView(Uint8Array.from(bytes).buffer);
+          return String(bytes.length === 4 ? dv.getFloat32(0, true) : dv.getFloat64(0, true));
+        }
+        case "name": return JSON.stringify(new TextDecoder().decode(Uint8Array.from(bytes.slice(0, bytes.indexOf(0) < 0 ? undefined : bytes.indexOf(0)))));
+        default: return "0x" + bytes.map((x) => x.toString(16).padStart(2, "0")).join("");
+      }
+    }
+
+    function varlenaValue(typ, data) {
+      if (["text", "varchar", "bpchar"].includes(typ)) return JSON.stringify(new TextDecoder().decode(Uint8Array.from(data)));
+      return "0x" + data.map((x) => x.toString(16).padStart(2, "0")).join("");
+    }
+
+    // Pivot tuples (separator keys on internal pages, and "high keys") can be suffix-truncated to fewer
+    // columns than the index has; pageinspect puts that column count in the offset part of their ctid.
+    const natts = (ctid) => Number(/,(\d+)\)/.exec(ctid ?? "")?.[1] ?? 0) & 0x0fff;
+
+    function decodeKey(cols, hex, maxAttrs = Infinity) {
+      if (!hex) return "";
+      const align = { c: 1, s: 2, i: 4, d: 8 };
+      const up = (n, a) => Math.ceil(n / a) * a;
+      try {
+        const b = hexBytes(hex);
+        const parts = [];
+        let off = 0;
+        for (const c of cols) {
+          if (off >= b.length || parts.length >= maxAttrs) break;
+          const len = Number(c.attlen);
+          if (len > 0) {
+            off = up(off, align[c.attalign] ?? 1);
+            if (off + len > b.length) break;
+            parts.push(fixedValue(c.typname, b.slice(off, off + len)));
+            off += len;
+          } else if (len === -1) {
+            if (b[off] & 1) { // 1-byte ("short") varlena header: length includes the header byte
+              const total = b[off] >> 1;
+              parts.push(varlenaValue(c.typname, b.slice(off + 1, off + total)));
+              off += total;
+            } else { // 4-byte header, 4-aligned
+              off = up(off, 4);
+              const total = (b[off] | (b[off + 1] << 8) | (b[off + 2] << 16) | (b[off + 3] << 24)) >>> 2;
+              parts.push(varlenaValue(c.typname, b.slice(off + 4, off + total)));
+              off += total;
+            }
+          } else break;
+        }
+        if (parts.length) return parts.join(", ");
+      } catch { /* fall through to raw hex */ }
+      return hex;
+    }
+
+    async function makeKeyDecoder(rel) {
+      const cols = (await window.db.query(
+        `SELECT t.typname, a.attlen, a.attalign
+         FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid
+         WHERE a.attrelid = $1::regclass AND a.attnum > 0 AND NOT a.attisdropped
+         ORDER BY a.attnum`, [rel])).rows;
+      return (hex, maxAttrs) => decodeKey(cols, hex, maxAttrs);
+    }
+
+    // ---- Tree model + d3 diagram ---------------------------------------------
+    const isHighKey = (r, rightmost) => !rightmost && Number(r.itemoffset) === 1;
+
+    // Breadth-first load of the page tree, one batched query per level. Internal pages need their items
+    // (downlinks + separator keys); leaf pages only need items when there are few enough to show key ranges.
+    const blkArray = (blks) => `ARRAY[${blks.map(Number).join(",")}]::bigint[]`; // ints from our own data
+    async function loadTreeModel(rel, rootBlk, decode, maxPages = 300) {
+      const statsFor = async (blks) => (await window.db.query(
+        `SELECT b AS blk, s.* FROM unnest(${blkArray(blks)}) AS b, LATERAL bt_page_stats($1, b) AS s`, [rel])).rows;
+      const itemsFor = async (blks) => {
+        const byBlk = new Map(blks.map((b) => [b, []]));
+        if (!blks.length) return byBlk;
+        const rows = (await window.db.query(
+          `SELECT b AS blk, i.* FROM unnest(${blkArray(blks)}) AS b, LATERAL bt_page_items($1, b) AS i
+           ORDER BY b, i.itemoffset`, [rel])).rows;
+        for (const r of rows) byBlk.get(Number(r.blk)).push(r);
+        return byBlk;
+      };
+
+      const nodes = new Map();
+      let frontier = [rootBlk];
+      let notDrawn = 0;
+      while (frontier.length) {
+        const room = Math.max(maxPages - nodes.size, 0);
+        let batch = [...new Set(frontier)];
+        if (batch.length > room) { notDrawn += batch.length - room; batch = batch.slice(0, room); }
+        if (!batch.length) break;
+        const stats = await statsFor(batch);
+        const internal = stats.filter((st) => Number(st.btpo_level) > 0).map((st) => Number(st.blk));
+        const items = await itemsFor(internal);
+        frontier = [];
+        for (const st of stats) {
+          const blk = Number(st.blk);
+          const n = { blk, st, level: Number(st.btpo_level), type: st.type, next: Number(st.btpo_next),
+                      live: Number(st.live_items), keys: [], childBlks: [] };
+          for (const r of items.get(blk) ?? []) {
+            if (isHighKey(r, n.next === 0)) continue;
+            const child = Number(/\((\d+),/.exec(r.ctid)?.[1]);
+            n.childBlks.push(child);
+            n.keys.push(r.data ? decode(r.data, natts(r.ctid)) : "");
+            frontier.push(child);
+          }
+          nodes.set(blk, n);
+        }
+      }
+      const leaves = [...nodes.values()].filter((n) => n.level === 0);
+      if (leaves.length && leaves.length <= 60) {
+        const leafItems = await itemsFor(leaves.map((n) => n.blk));
+        for (const n of leaves) {
+          n.keys = leafItems.get(n.blk).filter((r) => !isHighKey(r, n.next === 0)).map((r) => decode(r.data));
+          n.hasKeys = true;
+        }
+      }
+      return { nodes, notDrawn };
+    }
+
+    const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+
+    async function drawDiagram(rel, rootBlk, idx) {
+      const holder = document.getElementById("tree-diagram");
+      if (!holder) return;
+      if (!window.d3) { holder.innerHTML = '<div class="empty">d3 failed to load (node_modules/d3/dist/d3.min.js).</div>'; return; }
+      try {
+        const { nodes, notDrawn } = await loadTreeModel(rel, rootBlk, keyDecoders.get(rel));
+        if (selectedIndex !== idx) return; // another index was clicked while loading
+        const build = (blk) => {
+          const n = nodes.get(blk);
+          return { ...n, children: n.childBlks.filter((c) => nodes.has(c)).map(build) };
+        };
+        const root = d3.hierarchy(build(rootBlk));
+        const W = 214, H = 62, GAP_X = 24, GAP_Y = 64;
+        // With many leaves, draw them as narrow unlabelled bars so the whole tree fits on screen;
+        // hover for details, zoom for labels on the internal pages.
+        const compact = [...nodes.values()].filter((n) => n.level === 0).length > 16;
+        const wOf = (d) => (compact && d.data.level === 0 && d.data.blk !== rootBlk ? 10 : W);
+        const UNIT = 6;
+        d3.tree().nodeSize([UNIT, H + GAP_Y])
+          .separation((a, b) => ((wOf(a) + wOf(b)) / 2 + (compact ? 6 : GAP_X)) / UNIT)(root);
+
+        holder.innerHTML = "";
+        const svg = d3.select(holder).append("svg");
+        svg.append("defs").append("marker")
+          .attr("id", "sib-arrow").attr("viewBox", "0 0 10 10").attr("refX", 9).attr("refY", 5)
+          .attr("markerWidth", 7).attr("markerHeight", 7).attr("orient", "auto")
+          .append("path").attr("d", "M0,1 L9,5 L0,9 z");
+        const g = svg.append("g");
+
+        // parent -> child edges (from the bottom of a page to the top of its child)
+        g.selectAll("path.edge").data(root.links()).join("path").attr("class", "edge")
+          .attr("d", d3.linkVertical().x((p) => p.x).y((p) => p.y)
+            .source((l) => ({ x: l.source.x, y: l.source.y + H / 2 }))
+            .target((l) => ({ x: l.target.x, y: l.target.y - H / 2 })));
+
+        // right-sibling links (btpo_next): the leaf level is a linked list, as is every other level
+        const byBlk = new Map(root.descendants().map((d) => [d.data.blk, d]));
+        const sib = root.descendants().filter((d) => d.data.next && byBlk.has(d.data.next))
+          .map((d) => [d, byBlk.get(d.data.next)]);
+        g.selectAll("path.sibling").data(sib).join("path").attr("class", "sibling")
+          .attr("marker-end", ([a]) => (wOf(a) === W ? "url(#sib-arrow)" : null))
+          .attr("d", ([a, b]) => `M${a.x + wOf(a) / 2},${a.y} L${b.x - wOf(b) / 2 - 2},${b.y}`);
+
+        // one box per page
+        // pageinspect reports a root that is also a leaf as type "l", so identify the root by block number.
+        const isRoot = (d) => d.data.blk === rootBlk;
+        const typeClass = (d) => (isRoot(d) ? "root" : d.data.level > 0 ? "internal" : "leaf");
+        const node = g.selectAll("g.node").data(root.descendants()).join("g")
+          .attr("class", (d) => `node ${typeClass(d)}`)
+          .attr("transform", (d) => `translate(${d.x - wOf(d) / 2},${d.y - H / 2})`);
+        node.append("rect").attr("width", wOf).attr("height", H).attr("rx", (d) => (wOf(d) === W ? 3 : 2));
+        const full = node.filter((d) => wOf(d) === W); // labelled boxes (everything except compact leaves)
+        full.append("text").attr("x", 8).attr("y", 16)
+          .text((d) => `block (page) ${d.data.blk} · ${isRoot(d) ? (d.data.level ? "root" : "root+leaf") : d.data.level ? "internal" : "leaf"}`);
+        full.append("text").attr("class", "muted").attr("x", 8).attr("y", 32)
+          .text((d) => `${d.data.live} items · level ${d.data.level}`);
+        full.append("text").attr("x", 8).attr("y", 50).text((d) => {
+          const k = d.data.keys.filter(Boolean);
+          if (d.data.level > 0 || d.data.hasKeys) return k.length ? clip(k.length > 1 ? `${k[0]} … ${k[k.length - 1]}` : k[0], 31) : "";
+          return "";
+        });
+        node.append("title").text((d) => {
+          const k = d.data.keys;
+          const head = `block (page) ${d.data.blk} · ${d.data.live} items · btpo_prev ${d.data.st.btpo_prev} · btpo_next ${d.data.next}`;
+          return k.length ? `${head}\nkeys: ${k.slice(0, 12).join(" | ")}${k.length > 12 ? ` … (+${k.length - 12})` : ""}` : head;
+        });
+
+        // level labels in the left gutter
+        const rootLevel = root.data.level;
+        const minX = d3.min(root.descendants(), (d) => d.x - wOf(d) / 2);
+        g.selectAll("text.level").data(d3.range(root.height + 1)).join("text").attr("class", "muted level")
+          .attr("x", minX - 12).attr("y", (depth) => depth * (H + GAP_Y) + 4).attr("text-anchor", "end")
+          .text((depth) => `level ${rootLevel - depth}`);
+
+        // pan/zoom, starting fitted to the container
+        const zoom = d3.zoom().scaleExtent([0.05, 3]).on("zoom", (e) => g.attr("transform", e.transform));
+        svg.call(zoom);
+        const fit = () => {
+          const box = g.node().getBBox();
+          const w = svg.node().clientWidth, h = svg.node().clientHeight;
+          const k = Math.min(1, (w - 24) / box.width, (h - 24) / box.height);
+          const t = d3.zoomIdentity.translate((w - box.width * k) / 2 - box.x * k, (h - box.height * k) / 2 - box.y * k).scale(k);
+          svg.call(zoom.transform, t);
+        };
+        fit();
+        const resetBtn = document.getElementById("diagram-reset");
+        if (resetBtn) resetBtn.onclick = fit;
+
+        if (notDrawn) {
+          holder.insertAdjacentHTML("beforeend",
+            `<div class="empty">Diagram capped at ${nodes.size} pages; ${notDrawn} more page(s) not drawn.</div>`);
+        }
+      } catch (err) {
+        holder.innerHTML = `<div class="result-meta error" style="padding:.75rem">${escapeHtml(err.message ?? err)}</div>`;
+      }
+    }
+
+    // Duplicate keys can be stored once with a "posting list" of heap TIDs (B-tree deduplication).
+    const tidCount = (t) => (String(t ?? "").match(/\(/g) ?? []).length;
+
+    // Renders one B-tree page. Internal pages get lazy child <details>; leaf pages list their tuples.
+    async function pageHtml(rel, blk) {
+      const [st, it] = await Promise.all([
+        window.db.query("SELECT * FROM bt_page_stats($1, $2)", [rel, blk]),
+        window.db.query("SELECT * FROM bt_page_items($1, $2)", [rel, blk]),
+      ]);
+      const s = st.rows[0];
+      const items = it.rows;
+      const level = Number(s.btpo_level);
+      const rightmost = Number(s.btpo_next) === 0;
+      const decode = keyDecoders.get(rel) ?? ((hex) => hex);
+      const meta = `<div class="result-meta">block (page) ${blk} · type ${s.type} (${pageTypes[s.type] ?? "?"}) · ` +
+        `btpo_level ${level} · live_items ${s.live_items} · dead_items ${s.dead_items} · ` +
+        `free_size ${s.free_size} B · btpo_prev ${s.btpo_prev} · btpo_next ${s.btpo_next}</div>`;
+
+      if (level > 0) {
+        const rows = items.map((r) => {
+          // On every page except the rightmost, itemoffset 1 is the "high key" (upper bound), not a downlink.
+          if (!rightmost && Number(r.itemoffset) === 1) {
+            return `<div class="hk" title="${escapeHtml(r.data ?? "")}">itemoffset 1 · high key (upper bound of this page): ${escapeHtml(shorten(decode(r.data ?? "", natts(r.ctid))))}</div>`;
+          }
+          const child = /\((\d+),/.exec(r.ctid)?.[1];
+          const key = r.data ? escapeHtml(shorten(decode(r.data, natts(r.ctid)))) : "−∞ (no key: leftmost downlink)";
+          return `<details class="child" data-blk="${child}"><summary title="${escapeHtml(r.data ?? "")}">itemoffset ${r.itemoffset} · ` +
+            `key ${key} → block (page) ${child}</summary><div class="child-body"></div></details>`;
+        });
+        return meta + rows.join("");
+      }
+
+      const cap = 100;
+      const body = items.slice(0, cap).map((r) => [
+        [String(r.itemoffset), 1], [r.htid ?? r.ctid], [decode(r.data ?? "", isHighKey(r, rightmost) ? natts(r.ctid) : undefined), 0, r.data ?? ""],
+        [!rightmost && Number(r.itemoffset) === 1 ? "high key (page upper bound, not a row)"
+          : tidCount(r.tids) > 1 ? `posting list: ${tidCount(r.tids)} heap TIDs (deduplicated)`
+          : r.dead ? "dead" : ""],
+      ]);
+      const more = items.length > cap ? `<div class="empty">… ${items.length - cap} more items not shown</div>` : "";
+      return meta + statsTable(
+        [["itemoffset", 1], ["htid (heap tuple pointer)"], ["key (decoded; hover for raw bytes)"], ["note"]], body) + more;
+    }
+
+    async function showIndexTree(idx) {
+      selectedIndex = idx;
+      statsBody.querySelectorAll("tr[data-index]").forEach((tr) =>
+        tr.classList.toggle("selected", tr.dataset.schema === idx.schema && tr.dataset.name === idx.name));
+      const title = `<div class="tree-title">${escapeHtml(idx.schema)}.${escapeHtml(idx.name)} (${escapeHtml(idx.am)})</div>`;
+      if (idx.am !== "btree") {
+        treeEl.innerHTML = title + `<div class="empty">pageinspect can only walk btree indexes; this one is ${escapeHtml(idx.am)}.</div>`;
+        return;
+      }
+      treeEl.innerHTML = title + '<div class="empty">Loading…</div>';
+      try {
+        const rel = `${qident(idx.schema)}.${qident(idx.name)}`;
+        const m = (await window.db.query("SELECT * FROM bt_metap($1)", [rel])).rows[0];
+        const hint = `<span class="hint sub">Snapshot from bt_metap / bt_page_stats / bt_page_items. ` +
+          `Click the index again to reload. Expand downlinks to load child pages.</span>`;
+        const metaLine = `<div class="result-meta">bt_metap: root block (page) ${m.root} · level ${m.level} (tree height) · ` +
+          `fastroot ${m.fastroot} · fastlevel ${m.fastlevel}</div>`;
+        if (Number(m.root) === 0) {
+          treeEl.innerHTML = title + hint + metaLine + '<div class="empty">Index has no pages yet (empty).</div>';
+          return;
+        }
+        keyDecoders.set(rel, await makeKeyDecoder(rel));
+        const root = await pageHtml(rel, Number(m.root));
+        if (selectedIndex !== idx) return; // another index was clicked while loading
+        treeEl.innerHTML = title + hint + metaLine +
+          `<div class="section-head"><span class="tree-title">Diagram</span>` +
+          `<button id="diagram-reset" class="secondary">Reset view</button></div>` +
+          `<div id="tree-diagram" class="diagram"><div class="empty">Building diagram…</div></div>` +
+          `<p class="legend">A block (page) is one 8 KiB slot of the index file; each box is one page. Solid lines: parent → child downlinks. Dashed arrows: right-sibling links (btpo_next). ` +
+          `Scroll to zoom, drag to pan, hover a page for its keys.</p>` +
+          `<div class="section-head"><span class="tree-title">Pages</span></div>` +
+          `<div class="tree-root" data-rel="${escapeHtml(rel)}">${root}</div>`;
+        drawDiagram(rel, Number(m.root), idx);
+      } catch (err) {
+        treeEl.innerHTML = title + `<div class="result-meta error">${escapeHtml(err.message ?? err)}</div>`;
+      }
+    }
+
+    statsBody.addEventListener("click", (e) => {
+      const tr = e.target.closest("tr[data-index]");
+      if (tr) showIndexTree({ schema: tr.dataset.schema, name: tr.dataset.name, am: tr.dataset.am });
+    });
+
+    // <details> "toggle" doesn't bubble, so listen in the capture phase and load children on first open.
+    treeEl.addEventListener("toggle", async (e) => {
+      const d = e.target;
+      if (!d.matches?.("details.child") || !d.open || d.dataset.loaded) return;
+      d.dataset.loaded = "1";
+      const holder = d.querySelector(".child-body");
+      holder.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        holder.innerHTML = await pageHtml(d.closest(".tree-root").dataset.rel, Number(d.dataset.blk));
+      } catch (err) {
+        holder.innerHTML = `<div class="result-meta error">${escapeHtml(err.message ?? err)}</div>`;
+      }
+    }, true);
+
+    refreshBtn.addEventListener("click", refreshStats);
+    systemEl.addEventListener("change", refreshStats);
+    setInterval(() => {
+      if (autoEl.checked && !document.hidden) refreshStats();
+    }, 2000);
+
+    runBtn.addEventListener("click", run);
+    clearBtn.addEventListener("click", () => { resultsEl.innerHTML = ""; });
+    sqlEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        run();
+      }
+    });
+
+    // ---- Schema + seed data -----------------------------------------------------
+    const SCHEMA_SQL = `
+      CREATE TABLE IF NOT EXISTS fruits (
+        id          SERIAL PRIMARY KEY,
+        name        TEXT NOT NULL UNIQUE,
+        color       TEXT NOT NULL,
+        grams_each  INT  NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS bags (
+        id        SERIAL PRIMARY KEY,
+        label     TEXT NOT NULL,
+        packed_on DATE NOT NULL DEFAULT CURRENT_DATE
+      );
+      CREATE TABLE IF NOT EXISTS bag_items (
+        bag_id    INT NOT NULL REFERENCES bags(id)   ON DELETE CASCADE,
+        fruit_id  INT NOT NULL REFERENCES fruits(id) ON DELETE RESTRICT,
+        quantity  INT NOT NULL CHECK (quantity > 0),
+        PRIMARY KEY (bag_id, fruit_id)
+      );
+      -- Multicolumn indexes: usable for a leading-column match, optionally followed by the next column.
+      -- (fruit_id, quantity) also covers lookups on fruit_id alone, so the old single-column index is dropped.
+      DROP INDEX IF EXISTS bag_items_fruit_id_idx;
+      CREATE INDEX IF NOT EXISTS bag_items_fruit_qty_idx ON bag_items (fruit_id, quantity);
+      CREATE INDEX IF NOT EXISTS fruits_color_name_idx ON fruits (color, name);
+    `;
+
+    // 25 fruits, 400 bags; each bag gets a deterministic ~quarter of the fruits in 1-12 pieces
+    // (~2,500 bag_items, enough for the bag_items indexes to grow past a single page).
+    const SEED_SQL = `
+      INSERT INTO fruits (name, color, grams_each) VALUES
+        ('Apple', 'red', 180), ('Banana', 'yellow', 120), ('Orange', 'orange', 150),
+        ('Pear', 'green', 175), ('Peach', 'orange', 150), ('Plum', 'purple', 65),
+        ('Cherry', 'red', 8), ('Strawberry', 'red', 18), ('Blueberry', 'blue', 2),
+        ('Raspberry', 'red', 5), ('Blackberry', 'black', 8), ('Grape', 'green', 5),
+        ('Lemon', 'yellow', 100), ('Lime', 'green', 70), ('Mango', 'orange', 340),
+        ('Pineapple', 'yellow', 900), ('Kiwi', 'green', 75), ('Watermelon', 'green', 4500),
+        ('Cantaloupe', 'orange', 1200), ('Papaya', 'orange', 450), ('Pomegranate', 'red', 280),
+        ('Fig', 'purple', 50), ('Apricot', 'orange', 35), ('Coconut', 'brown', 680),
+        ('Grapefruit', 'pink', 250);
+
+      INSERT INTO bags (label, packed_on)
+      SELECT 'Bag ' || lpad(g::text, 3, '0'), CURRENT_DATE - (g % 120)
+      FROM generate_series(1, 400) g;
+
+      INSERT INTO bag_items (bag_id, fruit_id, quantity)
+      SELECT b.id, f.id, 1 + (hashtext(b.id || ':' || f.id || ':q') & 2147483647) % 12
+      FROM bags b
+      JOIN fruits f ON (hashtext(b.id || ':' || f.id) & 2147483647) % 4 = 0;
+    `;
+
+    try {
+      const { PGlite } = await import("@electric-sql/pglite");
+      // "idb://browser-db" persists to IndexedDB; use "memory://" for an ephemeral DB.
+      // pageinspect lets us read raw B-tree pages for the index viewer.
+      const { pageinspect } = await import("@electric-sql/pglite/contrib/pageinspect");
+      const db = await PGlite.create({ dataDir: "idb://browser-db", extensions: { pageinspect } });
+      await db.exec("CREATE EXTENSION IF NOT EXISTS pageinspect;");
+      await db.exec(SCHEMA_SQL);
+      // Seed only into an empty database so reloads (and your own edits) are left alone.
+      const seeded = (await db.query("SELECT count(*)::int AS n FROM fruits")).rows[0].n > 0;
+      if (!seeded) await db.exec(SEED_SQL);
+      window.db = db; // also available from the devtools console as `db`
+      const { rows } = await db.query("SELECT version() AS version");
+      statusEl.textContent = `Ready. ${rows[0].version.split(" on ")[0]}${seeded ? "" : " · seeded fruits and bags"}`;
+      sqlEl.value = `SELECT b.label, count(*) AS kinds, sum(bi.quantity) AS pieces
+FROM bags b
+JOIN bag_items bi ON bi.bag_id = b.id
+GROUP BY b.id, b.label
+ORDER BY b.id
+LIMIT 15;
+
+-- Uses bag_items_fruit_qty_idx (fruit_id, quantity): equality on the first column, range on the second.
+-- SELECT bag_id, quantity FROM bag_items WHERE fruit_id = 1 AND quantity >= 10 ORDER BY quantity;
+
+-- Uses fruits_color_name_idx (color, name): all fruits of one color, already ordered by name.
+-- SELECT name FROM fruits WHERE color = 'red' ORDER BY name;`;
+      sqlEl.disabled = false;
+      runBtn.disabled = false;
+      clearBtn.disabled = false;
+      refreshBtn.disabled = false;
+      run();
+    } catch (err) {
+      statusEl.style.color = "var(--error)";
+      statusEl.textContent = "Failed to start PGlite: " + (err?.stack ?? err);
+      console.error(err);
+    }
+  </script>
+</body>
+</html>
