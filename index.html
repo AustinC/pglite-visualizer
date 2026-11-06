@@ -210,7 +210,6 @@
       <h2 class="rule">Storage stats</h2>
       <div class="stats-head">
         <button id="refresh" class="secondary" disabled>Refresh</button>
-        <label><input type="checkbox" id="auto" checked /> Auto-refresh (2s)</label>
         <label><input type="checkbox" id="system" /> Show system schemas (pg_catalog, information_schema, pg_toast)</label>
         <span id="stats-updated" class="sub" style="margin:0"></span>
       </div>
@@ -330,7 +329,6 @@
     const statsBody = $("stats-body");
     const statsUpdated = $("stats-updated");
     const refreshBtn = $("refresh");
-    const autoEl = $("auto");
 
     function formatBytes(n) {
       n = Number(n);
@@ -784,9 +782,6 @@
 
     refreshBtn.addEventListener("click", refreshStats);
     systemEl.addEventListener("change", refreshStats);
-    setInterval(() => {
-      if (autoEl.checked && !document.hidden) refreshStats();
-    }, 2000);
 
     runBtn.addEventListener("click", run);
     clearBtn.addEventListener("click", () => { resultsEl.innerHTML = ""; });
